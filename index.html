@@ -49,6 +49,21 @@
         gap: 8px;
       }
 
+      .formula-input {
+        width: min(320px, 52vw);
+        border: 1px solid rgba(255, 255, 255, 0.25);
+        background: rgba(255, 255, 255, 0.12);
+        color: var(--text);
+        padding: 8px 10px;
+        border-radius: 8px;
+      }
+
+      .formula-result {
+        min-width: 120px;
+        font-size: 14px;
+        color: rgba(255, 255, 255, 0.9);
+      }
+
       button,
       input[type="color"],
       input[type="range"] {
@@ -107,12 +122,26 @@
           <button id="clear" type="button">清空</button>
           <button id="export" type="button">导出 PNG</button>
         </div>
+        <div class="group">
+          <label for="formula">公式</label>
+          <input
+            id="formula"
+            class="formula-input"
+            type="text"
+            placeholder="例如: (12 + 8) / 4 ^ 2"
+          />
+          <button id="calculate" type="button">计算</button>
+          <button id="write-result" type="button">写入黑板</button>
+          <span id="formula-result" class="formula-result">结果：-</span>
+        </div>
       </section>
 
       <section class="board-wrap">
         <canvas id="board"></canvas>
       </section>
-      <p class="hint">提示：按住鼠标左键或手指拖动即可绘画。</p>
+      <p class="hint">
+        提示：按住鼠标左键或手指拖动即可绘画；可输入数学公式进行演算并写入黑板。
+      </p>
     </main>
 
     <script>
@@ -125,14 +154,20 @@
       const eraserBtn = document.getElementById("eraser");
       const clearBtn = document.getElementById("clear");
       const exportBtn = document.getElementById("export");
+      const formulaInput = document.getElementById("formula");
+      const calculateBtn = document.getElementById("calculate");
+      const writeResultBtn = document.getElementById("write-result");
+      const formulaResult = document.getElementById("formula-result");
 
       const state = {
         drawing: false,
         erasing: false,
         lastX: 0,
         lastY: 0,
+        textY: 40,
         color: colorInput.value,
         size: Number(sizeInput.value),
+        lastCalc: null,
       };
 
       const boardColor = getComputedStyle(document.documentElement)
@@ -194,6 +229,49 @@
         state.drawing = false;
       }
 
+      function calculateFormula() {
+        const raw = formulaInput.value.trim();
+        if (!raw) {
+          formulaResult.textContent = "结果：请输入公式";
+          state.lastCalc = null;
+          return null;
+        }
+
+        const normalized = raw.replace(/\^/g, "**");
+        const valid = /^[0-9+\-*/().%\s*]+$/.test(normalized);
+        if (!valid) {
+          formulaResult.textContent = "结果：仅支持数字与 +-*/%^()";
+          state.lastCalc = null;
+          return null;
+        }
+
+        try {
+          const value = Function(`"use strict"; return (${normalized});`)();
+          if (!Number.isFinite(value)) {
+            throw new Error("invalid result");
+          }
+          state.lastCalc = `${raw} = ${value}`;
+          formulaResult.textContent = `结果：${value}`;
+          return state.lastCalc;
+        } catch (error) {
+          formulaResult.textContent = "结果：公式有误";
+          state.lastCalc = null;
+          return null;
+        }
+      }
+
+      function writeTextOnBoard(text) {
+        const rect = canvas.getBoundingClientRect();
+        const fontSize = Math.max(18, state.size * 4);
+        ctx.fillStyle = state.color;
+        ctx.font = `${fontSize}px Arial, "Microsoft YaHei", sans-serif`;
+        ctx.fillText(text, 20, state.textY);
+        state.textY += fontSize + 10;
+        if (state.textY > rect.height - 20) {
+          state.textY = 40;
+        }
+      }
+
       colorInput.addEventListener("input", () => {
         state.color = colorInput.value;
         state.erasing = false;
@@ -213,6 +291,7 @@
       clearBtn.addEventListener("click", () => {
         const rect = canvas.getBoundingClientRect();
         ctx.clearRect(0, 0, rect.width, rect.height);
+        state.textY = 40;
       });
 
       exportBtn.addEventListener("click", () => {
@@ -220,6 +299,20 @@
         link.download = `blackboard-${Date.now()}.png`;
         link.href = canvas.toDataURL("image/png");
         link.click();
+      });
+
+      calculateBtn.addEventListener("click", calculateFormula);
+
+      writeResultBtn.addEventListener("click", () => {
+        const calcText = state.lastCalc || calculateFormula();
+        if (!calcText) return;
+        writeTextOnBoard(calcText);
+      });
+
+      formulaInput.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          calculateFormula();
+        }
       });
 
       canvas.addEventListener("pointerdown", startDraw);
