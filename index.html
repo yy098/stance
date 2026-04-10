@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>电子黑板</title>
+    <style>
+      :root {
+        --board: #204a2b;
+        --board-shadow: #15341f;
+        --text: #f2f2f2;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: linear-gradient(135deg, #111, #222);
+        color: var(--text);
+        font-family: Arial, "Microsoft YaHei", sans-serif;
+      }
+
+      .app {
+        width: min(960px, 94vw);
+        display: grid;
+        gap: 14px;
+      }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 12px;
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.08);
+        backdrop-filter: blur(3px);
+      }
+
+      .toolbar .group {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .formula-input {
+        width: min(320px, 52vw);
+        border: 1px solid rgba(255, 255, 255, 0.25);
+        background: rgba(255, 255, 255, 0.12);
+        color: var(--text);
+        padding: 8px 10px;
+        border-radius: 8px;
+      }
+
+      .formula-result {
+        min-width: 120px;
+        font-size: 14px;
+        color: rgba(255, 255, 255, 0.9);
+      }
+
+      button,
+      input[type="color"],
+      input[type="range"] {
+        cursor: pointer;
+      }
+
+      button {
+        border: 1px solid rgba(255, 255, 255, 0.25);
+        background: rgba(255, 255, 255, 0.12);
+        color: var(--text);
+        padding: 8px 12px;
+        border-radius: 8px;
+      }
+
+      button:hover {
+        background: rgba(255, 255, 255, 0.2);
+      }
+
+      .board-wrap {
+        border: 8px solid #613c14;
+        border-radius: 10px;
+        box-shadow: 0 12px 24px rgba(0, 0, 0, 0.35);
+        overflow: hidden;
+      }
+
+      canvas {
+        display: block;
+        width: 100%;
+        height: 560px;
+        background: var(--board);
+        box-shadow: inset 0 0 0 2px var(--board-shadow);
+        touch-action: none;
+      }
+
+      .hint {
+        margin: 0;
+        font-size: 14px;
+        color: rgba(255, 255, 255, 0.75);
+      }
+    </style>
+  </head>
+  <body>
+    <main class="app">
+      <section class="toolbar">
+        <div class="group">
+          <label for="color">画笔颜色</label>
+          <input id="color" type="color" value="#ffffff" />
+        </div>
+        <div class="group">
+          <label for="size">粗细</label>
+          <input id="size" type="range" min="1" max="40" value="4" />
+          <span id="size-value">4</span>
+        </div>
+        <div class="group">
+          <button id="eraser" type="button">橡皮擦</button>
+          <button id="clear" type="button">清空</button>
+          <button id="export" type="button">导出 PNG</button>
+        </div>
+        <div class="group">
+          <label for="formula">公式</label>
+          <input
+            id="formula"
+            class="formula-input"
+            type="text"
+            placeholder="例如: (12 + 8) / 4 ^ 2"
+          />
+          <button id="calculate" type="button">计算</button>
+          <button id="write-result" type="button">写入黑板</button>
+          <span id="formula-result" class="formula-result">结果：-</span>
+        </div>
+      </section>
+
+      <section class="board-wrap">
+        <canvas id="board"></canvas>
+      </section>
+      <p class="hint">
+        提示：按住鼠标左键或手指拖动即可绘画；可输入数学公式进行演算并写入黑板。
+      </p>
+    </main>
+
+    <script>
+      const canvas = document.getElementById("board");
+      const ctx = canvas.getContext("2d");
+
+      const colorInput = document.getElementById("color");
+      const sizeInput = document.getElementById("size");
+      const sizeValue = document.getElementById("size-value");
+      const eraserBtn = document.getElementById("eraser");
+      const clearBtn = document.getElementById("clear");
+      const exportBtn = document.getElementById("export");
+      const formulaInput = document.getElementById("formula");
+      const calculateBtn = document.getElementById("calculate");
+      const writeResultBtn = document.getElementById("write-result");
+      const formulaResult = document.getElementById("formula-result");
+
+      const state = {
+        drawing: false,
+        erasing: false,
+        lastX: 0,
+        lastY: 0,
+        textY: 40,
+        color: colorInput.value,
+        size: Number(sizeInput.value),
+        lastCalc: null,
+      };
+
+      const boardColor = getComputedStyle(document.documentElement)
+        .getPropertyValue("--board")
+        .trim();
+
+      function resizeCanvas() {
+        const ratio = window.devicePixelRatio || 1;
+        const rect = canvas.getBoundingClientRect();
+        const oldPixels = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+        canvas.width = Math.round(rect.width * ratio);
+        canvas.height = Math.round(rect.height * ratio);
+        ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+
+        if (oldPixels.width > 0 && oldPixels.height > 0) {
+          const tmp = document.createElement("canvas");
+          tmp.width = oldPixels.width;
+          tmp.height = oldPixels.height;
+          const tmpCtx = tmp.getContext("2d");
+          tmpCtx.putImageData(oldPixels, 0, 0);
+          ctx.drawImage(tmp, 0, 0, rect.width, rect.height);
+        }
+      }
+
+      function getPos(event) {
+        const rect = canvas.getBoundingClientRect();
+        return {
+          x: event.clientX - rect.left,
+          y: event.clientY - rect.top,
+        };
+      }
+
+      function startDraw(event) {
+        state.drawing = true;
+        const pos = getPos(event);
+        state.lastX = pos.x;
+        state.lastY = pos.y;
+      }
+
+      function draw(event) {
+        if (!state.drawing) return;
+
+        const pos = getPos(event);
+        ctx.strokeStyle = state.erasing ? boardColor : state.color;
+        ctx.lineWidth = state.size;
+        ctx.beginPath();
+        ctx.moveTo(state.lastX, state.lastY);
+        ctx.lineTo(pos.x, pos.y);
+        ctx.stroke();
+
+        state.lastX = pos.x;
+        state.lastY = pos.y;
+      }
+
+      function stopDraw() {
+        state.drawing = false;
+      }
+
+      function calculateFormula() {
+        const raw = formulaInput.value.trim();
+        if (!raw) {
+          formulaResult.textContent = "结果：请输入公式";
+          state.lastCalc = null;
+          return null;
+        }
+
+        const normalized = raw.replace(/\^/g, "**");
+        const valid = /^[0-9+\-*/().%\s*]+$/.test(normalized);
+        if (!valid) {
+          formulaResult.textContent = "结果：仅支持数字与 +-*/%^()";
+          state.lastCalc = null;
+          return null;
+        }
+
+        try {
+          const value = Function(`"use strict"; return (${normalized});`)();
+          if (!Number.isFinite(value)) {
+            throw new Error("invalid result");
+          }
+          state.lastCalc = `${raw} = ${value}`;
+          formulaResult.textContent = `结果：${value}`;
+          return state.lastCalc;
+        } catch (error) {
+          formulaResult.textContent = "结果：公式有误";
+          state.lastCalc = null;
+          return null;
+        }
+      }
+
+      function writeTextOnBoard(text) {
+        const rect = canvas.getBoundingClientRect();
+        const fontSize = Math.max(18, state.size * 4);
+        ctx.fillStyle = state.color;
+        ctx.font = `${fontSize}px Arial, "Microsoft YaHei", sans-serif`;
+        ctx.fillText(text, 20, state.textY);
+        state.textY += fontSize + 10;
+        if (state.textY > rect.height - 20) {
+          state.textY = 40;
+        }
+      }
+
+      colorInput.addEventListener("input", () => {
+        state.color = colorInput.value;
+        state.erasing = false;
+        eraserBtn.textContent = "橡皮擦";
+      });
+
+      sizeInput.addEventListener("input", () => {
+        state.size = Number(sizeInput.value);
+        sizeValue.textContent = String(state.size);
+      });
+
+      eraserBtn.addEventListener("click", () => {
+        state.erasing = !state.erasing;
+        eraserBtn.textContent = state.erasing ? "使用画笔" : "橡皮擦";
+      });
+
+      clearBtn.addEventListener("click", () => {
+        const rect = canvas.getBoundingClientRect();
+        ctx.clearRect(0, 0, rect.width, rect.height);
+        state.textY = 40;
+      });
+
+      exportBtn.addEventListener("click", () => {
+        const link = document.createElement("a");
+        link.download = `blackboard-${Date.now()}.png`;
+        link.href = canvas.toDataURL("image/png");
+        link.click();
+      });
+
+      calculateBtn.addEventListener("click", calculateFormula);
+
+      writeResultBtn.addEventListener("click", () => {
+        const calcText = state.lastCalc || calculateFormula();
+        if (!calcText) return;
+        writeTextOnBoard(calcText);
+      });
+
+      formulaInput.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          calculateFormula();
+        }
+      });
+
+      canvas.addEventListener("pointerdown", startDraw);
+      canvas.addEventListener("pointermove", draw);
+      canvas.addEventListener("pointerup", stopDraw);
+      canvas.addEventListener("pointerleave", stopDraw);
+      canvas.addEventListener("pointercancel", stopDraw);
+
+      window.addEventListener("resize", resizeCanvas);
+      resizeCanvas();
+    </script>
+  </body>
+</html>
